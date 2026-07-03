@@ -173,9 +173,9 @@
   }
 
   /* ---------------------------------------------------------
-     2) 하루 일정표 (6:00 ~ 24:00 타임라인)
+     2) 하루 일정표 (5:00 ~ 24:00 타임라인)
   --------------------------------------------------------- */
-  var VIEW_START = 6*60;   // 06:00
+  var VIEW_START = 5*60;   // 05:00
   var VIEW_END   = 24*60;  // 24:00
   var HOUR_PX = 64;
 
@@ -237,24 +237,72 @@
     timeline.appendChild(eventsLayer);
     timeline.style.height = (totalHours * HOUR_PX) + "px";
 
-    day.events.forEach(function(ev){
-      var startMin = timeToMinutes(ev.start);
-      var endMin = timeToMinutes(ev.end);
-      if(startMin === null && endMin === null) return;
-      if(startMin === null) startMin = endMin - 30;
-      if(endMin === null) endMin = startMin + 30;
-      var clippedStart = Math.max(startMin, VIEW_START);
-      var clippedEnd = Math.min(endMin, VIEW_END);
+    // 시간이 겹치는 일정끼리는 폭을 나눠 배치해 서로 완전히 가리지 않도록 한다
+    var items = day.events.map(function(ev){
+      var s = timeToMinutes(ev.start);
+      var e = timeToMinutes(ev.end);
+      if(s === null && e === null) return null;
+      if(s === null) s = e - 30;
+      if(e === null) e = s + 30;
+      if(e <= s) e = s + 26;
+      return { ev: ev, s: s, e: e };
+    }).filter(Boolean);
+    items.sort(function(a,b){ return a.s - b.s; });
+
+    // 겹치는 구간끼리 클러스터로 묶는다 (정렬되어 있으므로 순서대로 스캔하면 됨)
+    var clusters = [];
+    var clusterEnd = -Infinity;
+    items.forEach(function(item){
+      if(!clusters.length || item.s >= clusterEnd){
+        clusters.push([item]);
+        clusterEnd = item.e;
+      } else {
+        clusters[clusters.length-1].push(item);
+        if(item.e > clusterEnd) clusterEnd = item.e;
+      }
+    });
+
+    // 클러스터 안에서 각 일정에 컬럼(가로 자리)을 배정
+    clusters.forEach(function(cluster){
+      var colEnds = [];
+      cluster.forEach(function(item){
+        var col = -1;
+        for(var c=0;c<colEnds.length;c++){
+          if(colEnds[c] <= item.s){ col = c; break; }
+        }
+        if(col === -1){ col = colEnds.length; colEnds.push(item.e); }
+        else { colEnds[col] = item.e; }
+        item.col = col;
+      });
+      cluster.forEach(function(item){ item.colCount = colEnds.length; });
+    });
+
+    var EDGE_GUTTER = 10;    // 배경 타임라인이 살짝 보이도록 우측에 남기는 여백(px)
+    var COL_GAP = 6;         // 겹치는 일정 사이 간격(px)
+    var MAX_COL_WIDTH = 400; // 넓은 화면에서도 일정 박스가 과도하게 넓어지지 않도록 하는 최대 폭(px)
+    var LEFT_OFFSET = 100;   // 해당 시간의 배경 타임라인이 보이도록 박스 영역을 좌측에서 띄우는 여백(px)
+    var layerWidth = eventsLayer.clientWidth;
+
+    items.forEach(function(item){
+      var ev = item.ev;
+      var clippedStart = Math.max(item.s, VIEW_START);
+      var clippedEnd = Math.min(item.e, VIEW_END);
       if(clippedEnd <= clippedStart) clippedEnd = clippedStart + 26;
 
       var top = (clippedStart - VIEW_START) / 60 * HOUR_PX;
       var height = Math.max(30, (clippedEnd - clippedStart) / 60 * HOUR_PX - 4);
+
+      var availWidth = layerWidth - EDGE_GUTTER - LEFT_OFFSET;
+      var colWidth = Math.min((availWidth - (item.colCount - 1) * COL_GAP) / item.colCount, MAX_COL_WIDTH);
+      var left = LEFT_OFFSET + item.col * (colWidth + COL_GAP);
 
       var cat = categorize(ev.title);
       var block = document.createElement("div");
       block.className = "event-block cat-" + cat.key + (containsName(ev, name) ? " me" : "");
       block.style.top = top + "px";
       block.style.height = height + "px";
+      block.style.left = left + "px";
+      block.style.width = colWidth + "px";
       block.setAttribute("tabindex","0");
       block.setAttribute("role","button");
       block.innerHTML =
