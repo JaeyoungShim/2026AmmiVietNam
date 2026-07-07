@@ -95,6 +95,51 @@
 
   function weekdayLabel(w){ return "(" + w + ")"; }
 
+  // 같은 시간대에 겹치는 일정들을 그룹으로 묶어 컬럼을 배정한다.
+  // items: [{start, end, ...}]  (분 단위, item.start/item.end 필요)
+  // 처리 후 각 item에 col(배정된 컬럼), totalCols(그 그룹의 전체 컬럼 수)를 채워 넣는다.
+  function computeOverlapLayout(items){
+    items.sort(function(a,b){ return a.start - b.start || a.end - b.end; });
+
+    var groups = [];
+    var current = [];
+    var groupEnd = -Infinity;
+    items.forEach(function(item){
+      if(current.length === 0 || item.start < groupEnd){
+        current.push(item);
+        groupEnd = Math.max(groupEnd, item.end);
+      } else {
+        groups.push(current);
+        current = [item];
+        groupEnd = item.end;
+      }
+    });
+    if(current.length) groups.push(current);
+
+    groups.forEach(function(group){
+      var columnEnds = []; // columnEnds[i] = 그 컬럼에 마지막으로 배치된 일정의 종료 시각
+      group.forEach(function(item){
+        var placed = false;
+        for(var i=0;i<columnEnds.length;i++){
+          if(columnEnds[i] <= item.start){
+            item.col = i;
+            columnEnds[i] = item.end;
+            placed = true;
+            break;
+          }
+        }
+        if(!placed){
+          item.col = columnEnds.length;
+          columnEnds.push(item.end);
+        }
+      });
+      var totalCols = columnEnds.length;
+      group.forEach(function(item){ item.totalCols = totalCols; });
+    });
+
+    return items;
+  }
+
   function wrapTablesForScroll(container){
     var tables = container.querySelectorAll("table");
     tables.forEach(function(table){
@@ -259,6 +304,8 @@
     timeline.appendChild(eventsLayer);
     timeline.style.height = (totalHours * HOUR_PX) + "px";
 
+    // 1) 이벤트별 표시 구간(clipped start/end) 계산
+    var laidOut = [];
     day.events.forEach(function(ev){
       var startMin = timeToMinutes(ev.start);
       var endMin = timeToMinutes(ev.end);
@@ -267,16 +314,33 @@
       if(endMin === null) endMin = startMin + 30;
       var clippedStart = Math.max(startMin, VIEW_START);
       var clippedEnd = Math.min(endMin, VIEW_END);
-      if(clippedEnd <= clippedStart) clippedEnd = clippedStart + 26;
+      if(clippedEnd < clippedStart) clippedEnd = clippedStart;
+      laidOut.push({ ev: ev, start: clippedStart, end: clippedEnd });
+    });
 
-      var top = (clippedStart - VIEW_START) / 60 * HOUR_PX;
-      var height = Math.max(30, (clippedEnd - clippedStart) / 60 * HOUR_PX - 4);
+    // 2) 겹치는 일정끼리 컬럼을 나눠 카드 너비/위치를 재배치
+    computeOverlapLayout(laidOut);
+
+    laidOut.forEach(function(item){
+      var ev = item.ev;
+      var top = (item.start - VIEW_START) / 60 * HOUR_PX;
+      var rawHeight = (item.end - item.start) / 60 * HOUR_PX - 4;
+      var height = Math.max(30, rawHeight);
 
       var cat = categorize(ev.title);
       var block = document.createElement("div");
       block.className = "event-block cat-" + cat.key + (containsName(ev, name) ? " me" : "");
       block.style.top = top + "px";
       block.style.height = height + "px";
+
+      // 겹치는 일정이 있으면 컬럼 폭에 맞춰 좌우 위치·너비를 지정, 없으면 기본(꽉 채움) 유지
+      if(item.totalCols > 1){
+        var gap = 6; // 카드 사이 여백(px)
+        block.style.right = "auto";
+        block.style.left = "calc(" + (item.col * 100 / item.totalCols) + "% + " + (gap/2) + "px)";
+        block.style.width = "calc(" + (100 / item.totalCols) + "% - " + gap + "px)";
+      }
+
       block.setAttribute("tabindex","0");
       block.setAttribute("role","button");
       block.innerHTML =
