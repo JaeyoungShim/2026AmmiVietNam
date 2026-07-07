@@ -95,6 +95,16 @@
 
   function weekdayLabel(w){ return "(" + w + ")"; }
 
+  function wrapTablesForScroll(container){
+    var tables = container.querySelectorAll("table");
+    tables.forEach(function(table){
+      var wrap = document.createElement("div");
+      wrap.className = "table-scroll";
+      table.parentNode.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    });
+  }
+
   /* ---------------------------------------------------------
      라우터
   --------------------------------------------------------- */
@@ -104,6 +114,7 @@
     if(parts[0] === "day") return { view:"day", dayIndex: Math.max(0, Math.min(DAYS.length-1, parseInt(parts[1],10) || 0)) };
     if(parts[0] === "event") return { view:"event", eventId: parts[1] };
     if(parts[0] === "name") return { view:"name" };
+    if(parts[0] === "checklist") return { view:"checklist" };
     return { view:"day", dayIndex: defaultDayIndex() };
   }
 
@@ -126,6 +137,8 @@
   /* ---------------------------------------------------------
      렌더 — 진입점
   --------------------------------------------------------- */
+  var lastDayIndex = 0;
+
   function render(){
     var name = getSelectedName();
     var route = parseHash();
@@ -138,6 +151,11 @@
       renderEventDetail(route.eventId, name);
       return;
     }
+    if(route.view === "checklist"){
+      renderChecklist(name);
+      return;
+    }
+    lastDayIndex = route.dayIndex;
     renderDayView(route.dayIndex, name);
   }
 
@@ -173,9 +191,9 @@
   }
 
   /* ---------------------------------------------------------
-     2) 하루 일정표 (5:00 ~ 24:00 타임라인)
+     2) 하루 일정표 (6:00 ~ 24:00 타임라인)
   --------------------------------------------------------- */
-  var VIEW_START = 5*60;   // 05:00
+  var VIEW_START = 6*60;   // 06:00
   var VIEW_END   = 24*60;  // 24:00
   var HOUR_PX = 64;
 
@@ -186,7 +204,10 @@
       '<div class="pass-header" id="passHeader">' +
         '<div class="pass-toprow">' +
           '<span>SAIGON MISSION · BOARDING PASS</span>' +
-          '<button class="pass-user" id="userBtn">' + escapeHtml(name) + ' 님</button>' +
+          '<div class="pass-toprow-actions">' +
+            '<button class="pass-user" id="checklistBtn">📋 체크리스트</button>' +
+            '<button class="pass-user" id="userBtn" title="이름 다시 선택">' + escapeHtml(name) + ' 님 <span aria-hidden="true">▾</span></button>' +
+          '</div>' +
         '</div>' +
         '<div class="pass-daynav">' +
           '<button class="pass-arrow" id="prevDay" ' + (dayIndex===0 ? "disabled":"") + '>‹</button>' +
@@ -214,6 +235,7 @@
     });
 
     document.getElementById("userBtn").addEventListener("click", function(){ navigate("#/name"); });
+    document.getElementById("checklistBtn").addEventListener("click", function(){ navigate("#/checklist"); });
     var prevBtn = document.getElementById("prevDay");
     var nextBtn = document.getElementById("nextDay");
     if(prevBtn) prevBtn.addEventListener("click", function(){ if(dayIndex>0) navigate("#/day/"+(dayIndex-1)); });
@@ -237,72 +259,24 @@
     timeline.appendChild(eventsLayer);
     timeline.style.height = (totalHours * HOUR_PX) + "px";
 
-    // 시간이 겹치는 일정끼리는 폭을 나눠 배치해 서로 완전히 가리지 않도록 한다
-    var items = day.events.map(function(ev){
-      var s = timeToMinutes(ev.start);
-      var e = timeToMinutes(ev.end);
-      if(s === null && e === null) return null;
-      if(s === null) s = e - 30;
-      if(e === null) e = s + 30;
-      if(e <= s) e = s + 26;
-      return { ev: ev, s: s, e: e };
-    }).filter(Boolean);
-    items.sort(function(a,b){ return a.s - b.s; });
-
-    // 겹치는 구간끼리 클러스터로 묶는다 (정렬되어 있으므로 순서대로 스캔하면 됨)
-    var clusters = [];
-    var clusterEnd = -Infinity;
-    items.forEach(function(item){
-      if(!clusters.length || item.s >= clusterEnd){
-        clusters.push([item]);
-        clusterEnd = item.e;
-      } else {
-        clusters[clusters.length-1].push(item);
-        if(item.e > clusterEnd) clusterEnd = item.e;
-      }
-    });
-
-    // 클러스터 안에서 각 일정에 컬럼(가로 자리)을 배정
-    clusters.forEach(function(cluster){
-      var colEnds = [];
-      cluster.forEach(function(item){
-        var col = -1;
-        for(var c=0;c<colEnds.length;c++){
-          if(colEnds[c] <= item.s){ col = c; break; }
-        }
-        if(col === -1){ col = colEnds.length; colEnds.push(item.e); }
-        else { colEnds[col] = item.e; }
-        item.col = col;
-      });
-      cluster.forEach(function(item){ item.colCount = colEnds.length; });
-    });
-
-    var EDGE_GUTTER = 10;    // 배경 타임라인이 살짝 보이도록 우측에 남기는 여백(px)
-    var COL_GAP = 6;         // 겹치는 일정 사이 간격(px)
-    var MAX_COL_WIDTH = 400; // 넓은 화면에서도 일정 박스가 과도하게 넓어지지 않도록 하는 최대 폭(px)
-    var LEFT_OFFSET = 100;   // 해당 시간의 배경 타임라인이 보이도록 박스 영역을 좌측에서 띄우는 여백(px)
-    var layerWidth = eventsLayer.clientWidth;
-
-    items.forEach(function(item){
-      var ev = item.ev;
-      var clippedStart = Math.max(item.s, VIEW_START);
-      var clippedEnd = Math.min(item.e, VIEW_END);
+    day.events.forEach(function(ev){
+      var startMin = timeToMinutes(ev.start);
+      var endMin = timeToMinutes(ev.end);
+      if(startMin === null && endMin === null) return;
+      if(startMin === null) startMin = endMin - 30;
+      if(endMin === null) endMin = startMin + 30;
+      var clippedStart = Math.max(startMin, VIEW_START);
+      var clippedEnd = Math.min(endMin, VIEW_END);
       if(clippedEnd <= clippedStart) clippedEnd = clippedStart + 26;
 
       var top = (clippedStart - VIEW_START) / 60 * HOUR_PX;
       var height = Math.max(30, (clippedEnd - clippedStart) / 60 * HOUR_PX - 4);
-
-      var availWidth = layerWidth - EDGE_GUTTER - LEFT_OFFSET;
-      var colWidth = Math.min((availWidth - (item.colCount - 1) * COL_GAP) / item.colCount, MAX_COL_WIDTH);
-      var left = LEFT_OFFSET + item.col * (colWidth + COL_GAP);
 
       var cat = categorize(ev.title);
       var block = document.createElement("div");
       block.className = "event-block cat-" + cat.key + (containsName(ev, name) ? " me" : "");
       block.style.top = top + "px";
       block.style.height = height + "px";
-      block.style.left = left + "px";
-      block.style.width = colWidth + "px";
       block.setAttribute("tabindex","0");
       block.setAttribute("role","button");
       block.innerHTML =
@@ -354,6 +328,7 @@
     var ev = item.event;
     var day = DAYS[item.dayIndex];
     var cat = categorize(ev.title);
+    lastDayIndex = item.dayIndex;
 
     var prevItem = flatIdx > 0 ? FLAT[flatIdx-1] : null;
     var nextItem = flatIdx < FLAT.length-1 ? FLAT[flatIdx+1] : null;
@@ -369,6 +344,7 @@
       '<div class="detail-screen">' +
         '<div class="detail-top">' +
           '<button class="detail-back" id="toDay">‹ 전체 일정표</button>' +
+          '<button class="detail-checklist" id="toChecklist">📋 체크리스트</button>' +
         '</div>' +
         '<div class="detail-hero">' +
           '<div class="detail-eyebrow">' + cat.icon + ' 7월 ' + day.day + '일 ' + weekdayLabel(day.weekday) + ' · ' + escapeHtml(day.title) + '</div>' +
@@ -386,11 +362,51 @@
     root.innerHTML = html;
 
     highlightName(document.getElementById("detailBody"), name);
+    wrapTablesForScroll(document.getElementById("detailBody"));
 
     document.getElementById("toDay").addEventListener("click", function(){ navigate("#/day/"+item.dayIndex); });
+    document.getElementById("toChecklist").addEventListener("click", function(){ navigate("#/checklist"); });
     document.getElementById("dayBtn").addEventListener("click", function(){ navigate("#/day/"+item.dayIndex); });
     if(prevItem) document.getElementById("prevBtn").addEventListener("click", function(){ navigate("#/event/"+prevItem.event.id); });
     if(nextItem) document.getElementById("nextBtn").addEventListener("click", function(){ navigate("#/event/"+nextItem.event.id); });
+
+    window.scrollTo(0,0);
+  }
+
+  /* ---------------------------------------------------------
+     4) 전체 핵심 체크리스트 요약 페이지
+  --------------------------------------------------------- */
+  function renderChecklist(name){
+    var bodyHtml;
+    try{
+      bodyHtml = marked.parse(DATA.checklist || "");
+    }catch(e){
+      bodyHtml = "<pre>" + escapeHtml(DATA.checklist || "") + "</pre>";
+    }
+
+    var html = '' +
+      '<div class="detail-screen">' +
+        '<div class="detail-top">' +
+          '<button class="detail-back" id="toDay">‹ 일정표로</button>' +
+        '</div>' +
+        '<div class="detail-hero">' +
+          '<div class="detail-eyebrow">📌 전체 참고자료</div>' +
+          '<h1 class="detail-title">핵심 체크리스트 요약</h1>' +
+          '<div class="detail-time">마감 항목 · 이동/식사 계획 · 연락처 · 조편성</div>' +
+        '</div>' +
+        '<div class="perforation"></div>' +
+        '<div class="detail-body" id="checklistBody">' + bodyHtml + '</div>' +
+      '</div>' +
+      '<div class="bottom-nav">' +
+        '<button class="nav-btn primary" id="dayBtn2" style="flex:1">📋 일정표로 돌아가기</button>' +
+      '</div>';
+    root.innerHTML = html;
+
+    highlightName(document.getElementById("checklistBody"), name);
+    wrapTablesForScroll(document.getElementById("checklistBody"));
+
+    document.getElementById("toDay").addEventListener("click", function(){ navigate("#/day/"+lastDayIndex); });
+    document.getElementById("dayBtn2").addEventListener("click", function(){ navigate("#/day/"+lastDayIndex); });
 
     window.scrollTo(0,0);
   }

@@ -152,6 +152,8 @@ button{font-family:inherit;}
   pointer-events:none;
 }
 .pass-toprow{
+  position:relative;
+  z-index:1;
   display:flex;
   justify-content:space-between;
   align-items:center;
@@ -161,6 +163,11 @@ button{font-family:inherit;}
   color:rgba(255,255,255,0.6);
   text-transform:uppercase;
   margin-bottom:14px;
+}
+.pass-toprow-actions{
+  display:flex;
+  align-items:center;
+  gap:6px;
 }
 .pass-user{
   background:rgba(255,255,255,0.1);
@@ -172,7 +179,13 @@ button{font-family:inherit;}
   font-size:11.5px;
   letter-spacing:0;
   text-transform:none;
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  transition:background .12s ease;
 }
+.pass-user:hover{background:rgba(255,255,255,0.18);}
+.pass-user:active{background:rgba(255,255,255,0.26);}
 .pass-daynav{
   display:flex;
   align-items:center;
@@ -250,11 +263,12 @@ button{font-family:inherit;}
 }
 .events-layer{
   position:absolute;
-  top:0; left:0; right:0;
+  top:0; left:52px; right:0;
   height:100%;
 }
 .event-block{
   position:absolute;
+  left:0; right:0;
   border-radius:10px;
   border-left:4px solid var(--jade);
   background:#fff;
@@ -315,6 +329,10 @@ button{font-family:inherit;}
 }
 .detail-top{
   padding:16px 20px 0;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
 }
 .detail-back{
   display:inline-flex;
@@ -328,6 +346,18 @@ button{font-family:inherit;}
   cursor:pointer;
   padding:6px 0;
 }
+.detail-checklist{
+  border:1px solid var(--line);
+  background:#fff;
+  color:var(--ink);
+  font-size:12px;
+  font-weight:600;
+  border-radius:20px;
+  padding:6px 12px;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.detail-checklist:hover{border-color:var(--gold); background:var(--gold-soft);}
 .detail-hero{
   padding:6px 20px 18px;
 }
@@ -359,8 +389,17 @@ button{font-family:inherit;}
 .detail-body table{
   width:100%;
   border-collapse:collapse;
-  margin:14px 0 20px;
+  margin:0;
   font-size:13.3px;
+}
+.table-scroll{
+  overflow-x:auto;
+  margin:14px 0 20px;
+  -webkit-overflow-scrolling:touch;
+  border-radius:8px;
+}
+.table-scroll table{
+  min-width:480px;
 }
 .detail-body th,.detail-body td{
   border:1px solid var(--line);
